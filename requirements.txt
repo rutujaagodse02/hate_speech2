@@ -6,4 +6,6 @@ scikit-learn
 seaborn
 wordcloud
 matplotlib
-textstat
+sentence-transformers
+detoxify
+xgboost
