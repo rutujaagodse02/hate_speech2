@@ -8,7 +8,7 @@ from sklearn.metrics import classification_report, confusion_matrix
 import tensorflow as tf
 from tensorflow.keras.preprocessing.text import Tokenizer
 from tensorflow.keras.preprocessing.sequence import pad_sequences
-from tensorflow.keras.layers import Layer, Input, Embedding, Bidirectional, GRU, Dense, Lambda, Dropout
+from tensorflow.keras.layers import Layer, Input, Embedding, Bidirectional, GRU, Dense, Lambda
 from tensorflow.keras import backend as K
 from tensorflow.keras.models import Model
 import matplotlib.pyplot as plt
@@ -99,32 +99,28 @@ if data is not None:
     st.write(data[['text', 'cleaned_text']].head())
 
     st.markdown("#### Word Cloud from Hate Speech Text")
-    hate_speech_text = " ".join(text for text in data[data['label'] != 'Not hate']['cleaned_text']).strip()
+    hate_speech_text = " ".join(text for text in data[data['label'] != 'Not hate']['cleaned_text'])
     
-    # Check if there is any text to generate the word cloud from
-    if hate_speech_text:
-        font_url = 'https://github.com/google/fonts/raw/main/ofl/solaimanlipi/SolaimanLipi.ttf'
-        try:
-            response = requests.get(font_url)
-            # Save font to a temporary file
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.ttf') as fp:
-                fp.write(response.content)
-                font_path = fp.name
-            
-            wordcloud = WordCloud(
-                font_path=font_path, width=800, height=400,
-                background_color='white', collocations=False
-            ).generate(hate_speech_text)
-            
-            fig_wc, ax_wc = plt.subplots()
-            ax_wc.imshow(wordcloud, interpolation='bilinear')
-            ax_wc.axis('off')
-            st.pyplot(fig_wc)
-            os.remove(font_path) # Clean up the temporary file
-        except Exception as e:
-            st.warning(f"Could not generate word cloud. Error: {e}")
-    else:
-        st.info("No words found to generate a word cloud for the hate speech category after preprocessing.")
+    font_url = 'https://github.com/google/fonts/raw/main/ofl/solaimanlipi/SolaimanLipi.ttf'
+    try:
+        response = requests.get(font_url)
+        # Save font to a temporary file
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.ttf') as fp:
+            fp.write(response.content)
+            font_path = fp.name
+        
+        wordcloud = WordCloud(
+            font_path=font_path, width=800, height=400,
+            background_color='white', collocations=False
+        ).generate(hate_speech_text)
+        
+        fig_wc, ax_wc = plt.subplots()
+        ax_wc.imshow(wordcloud, interpolation='bilinear')
+        ax_wc.axis('off')
+        st.pyplot(fig_wc)
+        os.remove(font_path) # Clean up the temporary file
+    except Exception as e:
+        st.warning(f"Could not generate word cloud. Error: {e}")
 
     st.subheader("Model Training: Capsule Network with GRU")
 
@@ -183,13 +179,12 @@ if data is not None:
                 return K.sqrt(K.sum(K.square(x), axis=-1))
 
             embedding_dim = 128
-            gru_units = 128 # Increased GRU units
+            gru_units = 64
             
             input_layer = Input(shape=(st.session_state.max_len,))
             embedding_layer = Embedding(max_words, embedding_dim, input_length=st.session_state.max_len)(input_layer)
             gru_layer = Bidirectional(GRU(gru_units, return_sequences=True))(embedding_layer)
-            gru_layer_with_dropout = Dropout(0.3)(gru_layer) # Added dropout for regularization
-            capsule = CapsuleLayer(num_capsules=num_classes, dim_capsule=16, routings=3)(gru_layer_with_dropout)
+            capsule = CapsuleLayer(num_capsules=num_classes, dim_capsule=16, routings=3)(gru_layer)
             output = Lambda(Length)(capsule)
             
             model = Model(inputs=input_layer, outputs=output)
@@ -200,7 +195,7 @@ if data is not None:
             model.summary(print_fn=lambda x: model_summary_list.append(x))
             st.text("\n".join(model_summary_list))
 
-            history = model.fit(X_train, y_train, batch_size=64, epochs=10, validation_split=0.1) # Increased epochs
+            history = model.fit(X_train, y_train, batch_size=64, epochs=5, validation_split=0.1)
             
             # Save model, tokenizer, and encoder to session state
             st.session_state.model = model
