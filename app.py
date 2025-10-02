@@ -8,8 +8,7 @@ from sklearn.metrics import classification_report, confusion_matrix
 import tensorflow as tf
 from tensorflow.keras.preprocessing.text import Tokenizer
 from tensorflow.keras.preprocessing.sequence import pad_sequences
-from tensorflow.keras.layers import Layer, Input, Embedding, Bidirectional, GRU, Dense, Lambda, Dropout
-from tensorflow.keras import backend as K
+from tensorflow.keras.layers import Input, Embedding, Bidirectional, GRU, Dense, Dropout
 from tensorflow.keras.models import Model
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -31,8 +30,8 @@ if 'max_len' not in st.session_state:
 
 # Title for the Streamlit app
 st.set_page_config(layout="wide")
-st.title("Bengali Hate Speech Detection using Capsule Network")
-st.markdown("This application trains a Capsule Network with GRU model to detect hate speech in Bengali text.")
+st.title("Bengali Hate Speech Detection using an RNN Model")
+st.markdown("This application trains a Bidirectional GRU (RNN) model to detect hate speech in Bengali text.")
 
 # Function to load data from a local CSV file
 @st.cache_data
@@ -98,33 +97,33 @@ if data is not None:
     st.write("#### Cleaned Text Preview:")
     st.write(data[['text', 'cleaned_text']].head())
 
-    # st.markdown("#### Word Cloud from Hate Speech Text")
-    # hate_speech_text = " ".join(text for text in data[data['label'] != 'Not hate']['cleaned_text']).strip()
+    st.markdown("#### Word Cloud from Hate Speech Text")
+    hate_speech_text = " ".join(text for text in data[data['label'] != 'Not hate']['cleaned_text']).strip()
     
-    # if hate_speech_text:
-    #     font_url = 'https://github.com/google/fonts/raw/main/ofl/solaimanlipi/SolaimanLipi.ttf'
-    #     try:
-    #         response = requests.get(font_url)
-    #         with tempfile.NamedTemporaryFile(delete=False, suffix='.ttf') as fp:
-    #             fp.write(response.content)
-    #             font_path = fp.name
+    if hate_speech_text:
+        font_url = 'https://github.com/google/fonts/raw/main/ofl/solaimanlipi/SolaimanLipi.ttf'
+        try:
+            response = requests.get(font_url)
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.ttf') as fp:
+                fp.write(response.content)
+                font_path = fp.name
             
-    #         wordcloud = WordCloud(
-    #             font_path=font_path, width=800, height=400,
-    #             background_color='white', collocations=False
-    #         ).generate(hate_speech_text)
+            wordcloud = WordCloud(
+                font_path=font_path, width=800, height=400,
+                background_color='white', collocations=False
+            ).generate(hate_speech_text)
             
-    #         fig_wc, ax_wc = plt.subplots()
-    #         ax_wc.imshow(wordcloud, interpolation='bilinear')
-    #         ax_wc.axis('off')
-    #         st.pyplot(fig_wc)
-    #         os.remove(font_path)
-    #     except Exception as e:
-    #         st.warning(f"Could not generate word cloud. Error: {e}")
-    # else:
-    #     st.info("No words found to generate a word cloud for the hate speech category after preprocessing.")
+            fig_wc, ax_wc = plt.subplots()
+            ax_wc.imshow(wordcloud, interpolation='bilinear')
+            ax_wc.axis('off')
+            st.pyplot(fig_wc)
+            os.remove(font_path)
+        except Exception as e:
+            st.warning(f"Could not generate word cloud. Error: {e}")
+    else:
+        st.info("No words found to generate a word cloud for the hate speech category after preprocessing.")
 
-    st.subheader("Model Training: Capsule Network with GRU")
+    st.subheader("Model Training: RNN with Bidirectional GRU")
 
     if st.button("Start Training"):
         with st.spinner("Training in progress... This may take a few minutes."):
@@ -143,54 +142,17 @@ if data is not None:
 
             X_train, X_test, y_train, y_test = train_test_split(padded_sequences, encoded_labels, test_size=0.2, random_state=42, stratify=encoded_labels)
             
-            class CapsuleLayer(Layer):
-                def __init__(self, num_capsules, dim_capsule, routings=3, **kwargs):
-                    super(CapsuleLayer, self).__init__(**kwargs)
-                    self.num_capsules = num_capsules
-                    self.dim_capsule = dim_capsule
-                    self.routings = routings
-
-                def build(self, input_shape):
-                    self.input_num_capsules = input_shape[1]
-                    self.input_dim_capsule = input_shape[2]
-                    self.W = self.add_weight(shape=[self.num_capsules, self.input_num_capsules, self.dim_capsule, self.input_dim_capsule], initializer='glorot_uniform', name='W')
-                    self.built = True
-
-                def call(self, inputs, training=None):
-                    inputs_hat = tf.einsum('bij,kimj->bkim', inputs, self.W)
-                    b = tf.zeros(shape=[tf.shape(inputs_hat)[0], self.num_capsules, self.input_num_capsules])
-                    for i in range(self.routings):
-                        c = tf.nn.softmax(b, axis=1)
-                        s_j = tf.einsum('bki,bkim->bkm', c, inputs_hat)
-                        outputs = self.squash(s_j)
-                        if i < self.routings - 1:
-                            agreement = tf.einsum('bkm,bkim->bki', outputs, inputs_hat)
-                            b += agreement
-                    return outputs
-
-                def compute_output_shape(self, input_shape):
-                    return tuple([None, self.num_capsules, self.dim_capsule])
-
-                @staticmethod
-                def squash(vectors, axis=-1):
-                    s_squared_norm = K.sum(K.square(vectors), axis, keepdims=True)
-                    scale = s_squared_norm / (1 + s_squared_norm) / K.sqrt(s_squared_norm + K.epsilon())
-                    return scale * vectors
-
-            def Length(x):
-                return K.sqrt(K.sum(K.square(x), axis=-1))
-
             embedding_dim = 128
-            gru_units = 128 # Increased GRU units for more capacity
-            dropout_rate = 0.4 # Added dropout for regularization
+            gru_units = 128
+            dropout_rate = 0.4
             
             input_layer = Input(shape=(st.session_state.max_len,))
             embedding_layer = Embedding(max_words, embedding_dim, input_length=st.session_state.max_len)(input_layer)
             embedding_dropout = Dropout(dropout_rate)(embedding_layer)
-            gru_layer = Bidirectional(GRU(gru_units, return_sequences=True))(embedding_dropout)
+            gru_layer = Bidirectional(GRU(gru_units, return_sequences=False))(embedding_dropout)
             gru_dropout = Dropout(dropout_rate)(gru_layer)
-            capsule = CapsuleLayer(num_capsules=num_classes, dim_capsule=16, routings=3)(gru_dropout)
-            output = Lambda(Length)(capsule)
+            dense_layer = Dense(64, activation='relu')(gru_dropout)
+            output = Dense(num_classes, activation='softmax')(dense_layer)
             
             model = Model(inputs=input_layer, outputs=output)
             model.compile(loss='sparse_categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
@@ -200,7 +162,7 @@ if data is not None:
             model.summary(print_fn=lambda x: model_summary_list.append(x))
             st.text("\n".join(model_summary_list))
 
-            history = model.fit(X_train, y_train, batch_size=64, epochs=10, validation_split=0.1) # Increased epochs for better training
+            history = model.fit(X_train, y_train, batch_size=64, epochs=10, validation_split=0.1)
             
             # Save model, tokenizer, and encoder to session state
             st.session_state.model = model
@@ -266,6 +228,4 @@ if st.session_state.model is not None:
 else:
     if data is None:
         st.warning("Could not load the dataset. Please ensure 'bengali_hate_speech_with_explicitness.csv' is in the correct directory.")
-
-
 
