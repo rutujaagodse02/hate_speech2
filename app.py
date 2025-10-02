@@ -235,6 +235,11 @@
 # else:
 #     if data is None:
 #         st.warning("Could not load the dataset. Please ensure 'bengali.csv' is in the correct directory.")
+
+
+
+
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -261,7 +266,7 @@ st.title("Bengali Hate Speech Detection")
 
 # --- Session State Initialization ---
 def init_session_state():
-    for key in ['model', 'tokenizer', 'label_encoder']:
+    for key in ['model', 'tokenizer', 'label_encoder', 'current_task']:
         if key not in st.session_state:
             st.session_state[key] = None
     if 'max_len' not in st.session_state:
@@ -275,6 +280,11 @@ task = st.sidebar.radio(
     "Choose a model to train and test:",
     ('Hate vs. Not Hate (Binary)', 'Multi-Class Hate Speech')
 )
+
+# Clear session state if task changes to ensure the correct model is used
+if st.session_state.current_task != task:
+    init_session_state()
+    st.session_state.current_task = task
 
 # --- Data Loading Functions ---
 @st.cache_data
@@ -324,17 +334,41 @@ def preprocess_text(text):
     tokens = text.split()
     return " ".join([word for word in tokens if word not in bengali_stopwords])
 
+# --- Model Creation Function ---
+def create_model(num_classes, max_len, is_multiclass=False):
+    input_layer = Input(shape=(max_len,))
+    embedding_layer = Embedding(10000, 128, input_length=max_len)(input_layer)
+    x = Dropout(0.4)(embedding_layer)
+
+    if is_multiclass:
+        # Deeper, more powerful model for the complex multi-class task
+        x = Bidirectional(GRU(128, return_sequences=True))(x)
+        x = Dropout(0.4)(x)
+        x = Bidirectional(GRU(64, return_sequences=False))(x)
+        x = Dropout(0.4)(x)
+        x = Dense(64, activation='relu')(x)
+    else:
+        # Standard model for the simpler binary task
+        x = Bidirectional(GRU(128, return_sequences=False))(x)
+        x = Dropout(0.4)(x)
+        x = Dense(64, activation='relu')(x)
+
+    output = Dense(num_classes, activation='softmax')(x)
+    model = Model(inputs=input_layer, outputs=output)
+    model.compile(loss='sparse_categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+    return model
+
+
 # --- Main Application Logic ---
+is_multiclass_task = False
 if task == 'Hate vs. Not Hate (Binary)':
     st.header("Task: Hate vs. Not Hate Classification")
     data = load_binary_data()
-    hate_label_column = 'label'
-    hate_value = 'Hate'
 else: # Multi-Class Hate Speech
     st.header("Task: Multi-Class Hate Speech Classification")
     data = load_multiclass_data()
-    hate_label_column = 'label'
-    hate_value = 'Personal' # Example, as we don't know all hate labels
+    is_multiclass_task = True
+
 
 if data is not None:
     # --- UI Columns for Data Display ---
@@ -362,7 +396,7 @@ if data is not None:
     st.write(data[['text', 'cleaned_text']].head())
 
     st.markdown("#### Word Cloud from Hate Speech Text")
-    hate_speech_text = " ".join(text for text in data[data[hate_label_column] != 'Not Hate']['cleaned_text']).strip()
+    hate_speech_text = " ".join(text for text in data[data['label'] != 'Not Hate']['cleaned_text']).strip()
     
     if hate_speech_text:
         font_url = 'https://github.com/google/fonts/raw/main/ofl/solaimanlipi/SolaimanLipi.ttf'
@@ -390,7 +424,11 @@ if data is not None:
     # --- Model Training ---
     st.subheader("Model Training: RNN with Bidirectional GRU")
     if st.button("Start Training"):
-        with st.spinner("Training in progress..."):
+        
+        epochs = 10 if is_multiclass_task else 5
+        spinner_message = f"Training for {epochs} epochs. This may take a while..." if is_multiclass_task else "Training in progress..."
+
+        with st.spinner(spinner_message):
             texts = data['cleaned_text'].values
             labels = data['label'].values
 
@@ -405,24 +443,14 @@ if data is not None:
 
             X_train, X_test, y_train, y_test = train_test_split(padded_sequences, encoded_labels, test_size=0.2, random_state=42, stratify=encoded_labels)
             
-            # --- Model Architecture ---
-            input_layer = Input(shape=(st.session_state.max_len,))
-            embedding_layer = Embedding(10000, 128, input_length=st.session_state.max_len)(input_layer)
-            dropout1 = Dropout(0.4)(embedding_layer)
-            gru_layer = Bidirectional(GRU(128, return_sequences=False))(dropout1)
-            dropout2 = Dropout(0.4)(gru_layer)
-            dense_layer = Dense(64, activation='relu')(dropout2)
-            output = Dense(num_classes, activation='softmax')(dense_layer)
-            
-            model = Model(inputs=input_layer, outputs=output)
-            model.compile(loss='sparse_categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+            model = create_model(num_classes, st.session_state.max_len, is_multiclass=is_multiclass_task)
             
             st.write("Model Summary:")
             model_summary_list = []
             model.summary(print_fn=lambda x: model_summary_list.append(x))
             st.text("\n".join(model_summary_list))
 
-            history = model.fit(X_train, y_train, batch_size=64, epochs=5, validation_split=0.1)
+            history = model.fit(X_train, y_train, batch_size=64, epochs=epochs, validation_split=0.1)
             
             st.session_state.model = model
             st.session_state.tokenizer = tokenizer
@@ -480,6 +508,8 @@ if st.session_state.model is not None:
             st.success(f"Predicted Label: **{predicted_label}**")
         else:
             st.warning("Please enter some text to classify.")
+
+
 
 
 
