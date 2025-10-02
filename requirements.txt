@@ -7,5 +7,3 @@ seaborn
 wordcloud
 matplotlib
 sentence-transformers
-detoxify
-xgboost
