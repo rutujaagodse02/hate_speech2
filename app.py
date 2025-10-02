@@ -8,7 +8,7 @@ from sklearn.metrics import classification_report, confusion_matrix
 import tensorflow as tf
 from tensorflow.keras.preprocessing.text import Tokenizer
 from tensorflow.keras.preprocessing.sequence import pad_sequences
-from tensorflow.keras.layers import Layer, Input, Embedding, Bidirectional, GRU, Dense, Lambda
+from tensorflow.keras.layers import Layer, Input, Embedding, Bidirectional, GRU, Dense, Lambda, Dropout
 from tensorflow.keras import backend as K
 from tensorflow.keras.models import Model
 import matplotlib.pyplot as plt
@@ -183,12 +183,13 @@ if data is not None:
                 return K.sqrt(K.sum(K.square(x), axis=-1))
 
             embedding_dim = 128
-            gru_units = 64
+            gru_units = 128 # Increased GRU units
             
             input_layer = Input(shape=(st.session_state.max_len,))
             embedding_layer = Embedding(max_words, embedding_dim, input_length=st.session_state.max_len)(input_layer)
             gru_layer = Bidirectional(GRU(gru_units, return_sequences=True))(embedding_layer)
-            capsule = CapsuleLayer(num_capsules=num_classes, dim_capsule=16, routings=3)(gru_layer)
+            gru_layer_with_dropout = Dropout(0.3)(gru_layer) # Added dropout for regularization
+            capsule = CapsuleLayer(num_capsules=num_classes, dim_capsule=16, routings=3)(gru_layer_with_dropout)
             output = Lambda(Length)(capsule)
             
             model = Model(inputs=input_layer, outputs=output)
@@ -199,7 +200,7 @@ if data is not None:
             model.summary(print_fn=lambda x: model_summary_list.append(x))
             st.text("\n".join(model_summary_list))
 
-            history = model.fit(X_train, y_train, batch_size=64, epochs=5, validation_split=0.1)
+            history = model.fit(X_train, y_train, batch_size=64, epochs=10, validation_split=0.1) # Increased epochs
             
             # Save model, tokenizer, and encoder to session state
             st.session_state.model = model
@@ -268,5 +269,4 @@ if st.session_state.model is not None:
 else:
     if data is None:
         st.warning("Could not load the dataset. Please ensure 'bengali_hate_speech_with_explicitness.csv' is in the correct directory.")
-
 
