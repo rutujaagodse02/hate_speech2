@@ -161,17 +161,31 @@ if data is not None:
                     self.built = True
 
                 def call(self, inputs, training=None):
-                    inputs_expand = K.expand_dims(inputs, 1)
-                    inputs_tiled = K.tile(inputs_expand, [1, self.num_capsules, 1, 1])
-                    inputs_hat = K.map_fn(lambda x: K.batch_dot(x, self.W, [2, 3]), elems=inputs_tiled)
+                    # Corrected routing logic using tf.einsum to avoid shape mismatches.
+                    # einsum signature:
+                    # b: batch_size, i: input_num_capsules, j: input_dim_capsule
+                    # k: num_capsules, m: dim_capsule
+                    
+                    # Calculate prediction vectors (inputs_hat)
+                    inputs_hat = tf.einsum('bij,kjmi->bkmi', inputs, self.W)
 
-                    b = tf.zeros(shape=[K.shape(inputs_hat)[0], self.num_capsules, self.input_num_capsules])
+                    # Routing by agreement
+                    b = tf.zeros(shape=[tf.shape(inputs_hat)[0], self.num_capsules, self.input_num_capsules])
 
                     for i in range(self.routings):
                         c = tf.nn.softmax(b, axis=1)
-                        outputs = self.squash(K.batch_dot(c, inputs_hat, [2, 2]))
+                        
+                        # Calculate weighted sum of prediction vectors
+                        s_j = tf.einsum('bki,bkmi->bkm', c, inputs_hat)
+
+                        # Apply squash activation
+                        outputs = self.squash(s_j)
+                        
+                        # Update routing weights (b) if not the last iteration
                         if i < self.routings - 1:
-                            b += K.batch_dot(outputs, inputs_hat, [2, 3])
+                            agreement = tf.einsum('bkm,bkmi->bki', outputs, inputs_hat)
+                            b += agreement
+                            
                     return outputs
 
                 def compute_output_shape(self, input_shape):
@@ -257,4 +271,5 @@ if data is not None:
 
 else:
     st.warning("Could not load the dataset. Please check the URL or your connection.")
+
 
