@@ -1,208 +1,256 @@
-# app.py
-
 import streamlit as st
 import pandas as pd
 import numpy as np
 import re
-from wordcloud import WordCloud
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder
+from sklearn.metrics import classification_report, confusion_matrix
+import tensorflow as tf
+from tensorflow.keras.preprocessing.text import Tokenizer
+from tensorflow.keras.preprocessing.sequence import pad_sequences
+from tensorflow.keras.layers import Layer
+from tensorflow.keras import backend as K
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Input, Embedding, Bidirectional, GRU, Dense
 import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.model_selection import train_test_split
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
-from sklearn.preprocessing import LabelEncoder
+from wordcloud import WordCloud
+import requests
+from io import BytesIO
 
-# Advanced Model Import
-from sentence_transformers import SentenceTransformer
-from scipy.sparse import hstack, csr_matrix
+# Title for the Streamlit app
+st.title("Bengali Hate Speech Detection using Capsule Network")
+st.markdown("This application trains a Capsule Network with GRU model to detect hate speech in Bengali text.")
 
-# --- Page Configuration ---
-st.set_page_config(
-    page_title="Bengali Hate Speech Detection",
-    page_icon="🇧🇩",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
-
-# --- Model Loading (Cached for performance) ---
-@st.cache_resource
-def load_semantic_model():
-    """Loads the Multilingual SentenceTransformer model."""
-    return SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
-
-semantic_model = load_semantic_model()
-
-# --- Data Loading and Preprocessing ---
+# Function to load data from a raw GitHub URL
 @st.cache_data
 def load_data():
-    """Loads the Bengali dataset and includes error handling."""
+    url = 'https://raw.githubusercontent.com/rezacsedu/bengali-hate-speech-with-explicitness/main/bengali_hate_speech.csv'
     try:
-        data = pd.read_csv("bengali_hate_speech_with_explicitness.csv")
-    except FileNotFoundError:
-        st.error("FATAL ERROR: 'bengali_hate_speech_with_explicitness.csv' not found. Please ensure the file is in your GitHub repository's main directory.")
-        st.stop()
-    # Drop rows where 'text' or 'label' is missing to prevent errors
-    data.dropna(subset=['text', 'label'], inplace=True)
-    return data
-
-def preprocess_bengali_text(texts):
-    """Cleans and preprocesses a list of Bengali text strings."""
-    stopwords = set(['এবং', 'একটি', 'এই', 'ও', 'থেকে', 'জন্য', 'জে', 'করুন', 'আপনার', 'সব', 'কে', 'সে', 'কি', 'তার', 'তিনি', 'আমি', 'আপনি'])
-    
-    processed_texts = []
-    for text in texts:
-        text = str(text)
-        text = re.sub(r'http[s]?://\S+', '', text) # remove URLs
-        text = re.sub(r'[^\u0980-\u09FF\s]', '', text) # Keep only Bengali characters and spaces
-        tokens = text.split()
-        tokens = [word for word in tokens if word not in stopwords]
-        processed_texts.append(" ".join(tokens))
-    return processed_texts
-
-# --- Feature Engineering and Model Training ---
-@st.cache_data
-def create_hybrid_features(_data, _text_col, _label_col):
-    """Generates features and encodes labels for Bengali text."""
-    _data['processed_text'] = preprocess_bengali_text(_data[_text_col])
-    
-    tfidf_vectorizer = TfidfVectorizer(ngram_range=(1, 2), max_df=0.9, min_df=3, max_features=5000)
-    X_tfidf = tfidf_vectorizer.fit_transform(_data['processed_text'])
-    
-    X_semantic = semantic_model.encode(_data[_text_col].tolist(), show_progress_bar=False)
-    
-    X_combined = hstack([X_tfidf, csr_matrix(X_semantic)]).tocsr()
-    
-    le = LabelEncoder()
-    y_encoded = le.fit_transform(_data[_label_col])
-    
-    return X_combined, y_encoded, tfidf_vectorizer, le
-
-@st.cache_resource
-def train_classifier(_X_train, _y_train):
-    """Trains a Logistic Regression model."""
-    model = LogisticRegression(max_iter=1000, random_state=42)
-    model.fit(_X_train, _y_train)
-    return model
-
-# --- Main Application UI ---
-st.title("🇧🇩 Bengali Hate Speech Detection Dashboard")
-st.markdown("Analysis of the `bengali_hate_speech_with_explicitness.csv` dataset.")
+        df = pd.read_csv(url)
+        # Drop rows with missing values in 'text' or 'label'
+        df.dropna(subset=['text', 'label'], inplace=True)
+        return df
+    except Exception as e:
+        st.error(f"Error loading data: {e}")
+        return None
 
 data = load_data()
 
-st.sidebar.title("Dashboard Controls")
-st.sidebar.markdown("---")
-analysis_choice = st.sidebar.radio("Go to:", ("Exploratory Data Analysis", "Model Performance", "Word Cloud Visualizations"))
-st.sidebar.markdown("---")
-
-
-if analysis_choice == "Exploratory Data Analysis":
-    # --- THIS SECTION IS BUILT ONLY FOR 'bengali_hate_speech_with_explicitness.csv' ---
-    st.header("📊 Exploratory Data Analysis")
-    st.info("This section displays the structure and distributions within your new Bengali dataset.")
-    
+if data is not None:
     st.subheader("Dataset Preview")
-    st.dataframe(data) # Display the full loaded dataframe
-    
-    # Create columns for side-by-side charts
-    col1, col2 = st.columns(2)
+    st.write(data.head())
 
-    with col1:
-        st.subheader("Distribution of 'label'")
-        fig, ax = plt.subplots()
-        label_counts = data['label'].value_counts()
-        sns.barplot(x=label_counts.index, y=label_counts.values, ax=ax, palette="rocket")
-        ax.set_title("Content Labels")
-        ax.set_ylabel("Count")
-        plt.xticks(rotation=45, ha='right')
-        st.pyplot(fig)
+    st.subheader("Dataset Description")
+    st.write(f"The dataset contains {data.shape[0]} rows and {data.shape[1]} columns.")
+    st.write("Columns:", ", ".join(data.columns))
 
-    with col2:
-        st.subheader("Distribution of 'target'")
-        fig, ax = plt.subplots()
-        target_counts = data['target'].value_counts()
-        sns.barplot(x=target_counts.index, y=target_counts.values, ax=ax, palette="plasma")
-        ax.set_title("Hate Speech Targets")
-        ax.set_ylabel("Count")
-        plt.xticks(rotation=45, ha='right')
-        st.pyplot(fig)
+    # --- Data Visualization ---
+    st.subheader("Data Visualization")
 
-    st.subheader("Distribution of 'explicitness'")
+    # Label Distribution
+    st.markdown("#### Distribution of Labels")
     fig, ax = plt.subplots()
-    explicitness_counts = data['explicitness'].value_counts()
-    sns.barplot(x=explicitness_counts.index, y=explicitness_counts.values, ax=ax, palette="viridis")
-    ax.set_title("Explicitness of Content")
-    ax.set_ylabel("Count")
-    plt.xticks(rotation=0)
+    sns.countplot(x='label', data=data, ax=ax)
+    plt.xticks(rotation=45)
     st.pyplot(fig)
 
+    # --- Text Preprocessing ---
+    st.subheader("Text Preprocessing")
+    
+    # Define Bengali stopwords
+    bengali_stopwords = [
+        'এবং', 'ও', 'আর', 'বা', 'কিংবা', 'হয়', 'হচ্ছে', 'হয়েছে', 'ছিল', 'আছে', 'এই',
+        'সেই', 'যে', 'সে', 'কি', 'কে', 'কোন', 'কার', 'কাকে', 'আমি', 'তুমি', 'সে',
+        'আমার', 'তোমার', 'তার', 'আমাদের', 'তোমাদের', 'তাদের', 'জন্য', 'থেকে', 'সঙ্গে',
+        'দ্বারা', 'কাছে', 'দিকে', 'মধ্যে', 'উপরে', 'নিচে', 'পরে', 'আগে', 'এক', 'দুই'
+    ]
 
-elif analysis_choice == "Model Performance":
-    st.header("🚀 Model Performance Analysis")
-    st.markdown("Training a model to predict the **'label'** column.")
-    
-    with st.spinner("Preparing features and training model... This may take a minute on the first run."):
-        X_combined, y, tfidf_vectorizer, label_encoder = create_hybrid_features(data, 'text', 'label')
-        class_labels = label_encoder.classes_
-        X_train, X_test, y_train, y_test = train_test_split(X_combined, y, random_state=42, test_size=0.25, stratify=y)
-        model = train_classifier(X_train, y_train)
-    
-    st.success("Model is ready!")
-    st.subheader("Classifier Performance Metrics")
-    y_preds = model.predict(X_test)
-    
-    st.text(f"Overall Accuracy: {accuracy_score(y_test, y_preds):.4f}")
-    report = classification_report(y_test, y_preds, target_names=class_labels, output_dict=True)
-    st.dataframe(pd.DataFrame(report).transpose().style.format("{:.2f}"))
+    def preprocess_text(text):
+        # Remove URLs, mentions, and hashtags
+        text = re.sub(r'http\S+|www\S+|https\S+', '', text, flags=re.MULTILINE)
+        text = re.sub(r'\@\w+|\#','', text)
+        # Remove punctuation and numbers
+        text = re.sub(r'[^\u0980-\u09FF\s]', '', text)
+        # Remove extra whitespace
+        text = re.sub(r'\s+', ' ', text).strip()
+        # Remove stopwords
+        tokens = text.split()
+        tokens = [word for word in tokens if word not in bengali_stopwords]
+        return " ".join(tokens)
 
-    st.subheader("Confusion Matrix")
-    cm = confusion_matrix(y_test, y_preds)
-    fig, ax = plt.subplots()
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=class_labels, yticklabels=class_labels, ax=ax)
-    ax.set_xlabel("Predicted")
-    ax.set_ylabel("Actual")
-    st.pyplot(fig)
+    data['cleaned_text'] = data['text'].apply(preprocess_text)
     
-    st.sidebar.header("Try a Live Prediction")
-    user_input = st.sidebar.text_area("Enter Bengali text to classify:", key="user_input")
-    if st.sidebar.button("Classify"):
-        if user_input:
-            with st.spinner("Analyzing..."):
-                processed_input = preprocess_bengali_text([user_input])
-                input_tfidf = tfidf_vectorizer.transform(processed_input)
-                input_semantic = semantic_model.encode([user_input])
-                input_combined = hstack([input_tfidf, csr_matrix(input_semantic)]).tocsr()
-                prediction_encoded = model.predict(input_combined)
-                prediction_label = label_encoder.inverse_transform(prediction_encoded)[0]
-            
-            st.sidebar.subheader("Prediction Result")
-            st.sidebar.info(f"Predicted Class ('label'): **{prediction_label}**")
-        else:
-            st.sidebar.write("Please enter some text.")
+    st.markdown("Applied the following preprocessing steps:")
+    st.markdown("- Removed URLs, mentions, and hashtags.")
+    st.markdown("- Removed punctuation and numbers, keeping only Bengali characters.")
+    st.markdown("- Removed common Bengali stopwords.")
+    st.markdown("- Removed extra whitespace.")
 
+    st.write("#### Cleaned Text Preview:")
+    st.write(data[['text', 'cleaned_text']].head())
 
-elif analysis_choice == "Word Cloud Visualizations":
-    st.header("☁️ Word Cloud Visualizations")
+    # --- Word Cloud ---
+    st.markdown("#### Word Cloud from Hate Speech Text")
+    hate_speech_text = " ".join(text for text in data[data['label'] != 'Not hate']['cleaned_text'])
     
-    font_path = 'Nikosh.ttf'
+    # Download a Bengali font
+    font_url = 'https://github.com/google/fonts/raw/main/ofl/solaimanlipi/SolaimanLipi.ttf'
     try:
-        f = open(font_path, 'rb')
-        f.close()
-    except FileNotFoundError:
-        st.error(f"FATAL ERROR: Font file 'Nikosh.ttf' not found. Please upload it to your GitHub repository.")
-        st.stop()
-        
-    if 'processed_text' not in data.columns:
-        data['processed_text'] = preprocess_bengali_text(data['text'])
-    
-    st.subheader("Word Cloud for All Text")
-    all_words = ' '.join([text for text in data['processed_text']])
-    if all_words.strip():
-        wordcloud = WordCloud(width=800, height=500, background_color='white', font_path=font_path).generate(all_words)
-        fig, ax = plt.subplots()
-        ax.imshow(wordcloud, interpolation='bilinear')
-        ax.axis('off')
-        st.pyplot(fig)
-    else:
-        st.warning("Not enough words to generate a word cloud.")
+        response = requests.get(font_url)
+        font_bytes = BytesIO(response.content)
+
+        wordcloud = WordCloud(
+            font_path=font_bytes,
+            width=800,
+            height=400,
+            background_color='white',
+            collocations=False
+        ).generate(hate_speech_text)
+
+        fig_wc, ax_wc = plt.subplots()
+        ax_wc.imshow(wordcloud, interpolation='bilinear')
+        ax_wc.axis('off')
+        st.pyplot(fig_wc)
+    except Exception as e:
+        st.warning(f"Could not generate word cloud. Error: {e}")
+
+
+    # --- Model Training ---
+    st.subheader("Model Training: Capsule Network with GRU")
+
+    if st.button("Start Training"):
+        with st.spinner("Training in progress... This may take a few minutes."):
+            # Prepare data for model
+            texts = data['cleaned_text'].values
+            labels = data['label'].values
+
+            # Encode labels
+            label_encoder = LabelEncoder()
+            encoded_labels = label_encoder.fit_transform(labels)
+            num_classes = len(label_encoder.classes_)
+
+            # Tokenize and pad sequences
+            max_words = 10000
+            max_len = 150
+            tokenizer = Tokenizer(num_words=max_words)
+            tokenizer.fit_on_texts(texts)
+            sequences = tokenizer.texts_to_sequences(texts)
+            padded_sequences = pad_sequences(sequences, maxlen=max_len)
+
+            # Split data
+            X_train, X_test, y_train, y_test = train_test_split(padded_sequences, encoded_labels, test_size=0.2, random_state=42, stratify=encoded_labels)
+            
+            # --- Capsule Network Layer Definition ---
+            class CapsuleLayer(Layer):
+                def __init__(self, num_capsules, dim_capsule, routings=3, **kwargs):
+                    super(CapsuleLayer, self).__init__(**kwargs)
+                    self.num_capsules = num_capsules
+                    self.dim_capsule = dim_capsule
+                    self.routings = routings
+
+                def build(self, input_shape):
+                    self.input_num_capsules = input_shape[1]
+                    self.input_dim_capsule = input_shape[2]
+                    self.W = self.add_weight(shape=[self.num_capsules, self.input_num_capsules, self.dim_capsule, self.input_dim_capsule],
+                                             initializer='glorot_uniform',
+                                             name='W')
+                    self.built = True
+
+                def call(self, inputs, training=None):
+                    inputs_expand = K.expand_dims(inputs, 1)
+                    inputs_tiled = K.tile(inputs_expand, [1, self.num_capsules, 1, 1])
+                    inputs_hat = K.map_fn(lambda x: K.batch_dot(x, self.W, [2, 3]), elems=inputs_tiled)
+
+                    b = tf.zeros(shape=[K.shape(inputs_hat)[0], self.num_capsules, self.input_num_capsules])
+
+                    for i in range(self.routings):
+                        c = tf.nn.softmax(b, axis=1)
+                        outputs = self.squash(K.batch_dot(c, inputs_hat, [2, 2]))
+                        if i < self.routings - 1:
+                            b += K.batch_dot(outputs, inputs_hat, [2, 3])
+                    return outputs
+
+                def compute_output_shape(self, input_shape):
+                    return tuple([None, self.num_capsules, self.dim_capsule])
+
+                @staticmethod
+                def squash(vectors, axis=-1):
+                    s_squared_norm = K.sum(K.square(vectors), axis, keepdims=True)
+                    scale = s_squared_norm / (1 + s_squared_norm) / K.sqrt(s_squared_norm + K.epsilon())
+                    return scale * vectors
+
+            # --- Build the Model ---
+            embedding_dim = 128
+            gru_units = 64
+            
+            input_layer = Input(shape=(max_len,))
+            embedding_layer = Embedding(max_words, embedding_dim)(input_layer)
+            gru_layer = Bidirectional(GRU(gru_units, return_sequences=True))(embedding_layer)
+            
+            capsule = CapsuleLayer(num_capsules=num_classes, dim_capsule=16, routings=3)(gru_layer)
+            
+            # Use a custom layer to compute the length of the capsule vectors
+            def Length(x):
+                return tf.sqrt(tf.reduce_sum(tf.square(x), axis=-1))
+
+            output = Dense(num_classes, activation='softmax')(tf.keras.layers.Lambda(Length)(capsule))
+            
+            model = Model(inputs=input_layer, outputs=output)
+            model.compile(loss='sparse_categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+            
+            st.write("Model Summary:")
+            model_summary_list = []
+            model.summary(print_fn=lambda x: model_summary_list.append(x))
+            st.text("\n".join(model_summary_list))
+
+            # Train the model
+            history = model.fit(X_train, y_train, batch_size=64, epochs=5, validation_split=0.1)
+
+            st.success("Model training completed!")
+
+            # --- Evaluation ---
+            st.subheader("Model Evaluation")
+            loss, accuracy = model.evaluate(X_test, y_test, verbose=0)
+            st.write(f"Test Accuracy: {accuracy:.4f}")
+            st.write(f"Test Loss: {loss:.4f}")
+
+            # Predictions
+            y_pred_probs = model.predict(X_test)
+            y_pred = np.argmax(y_pred_probs, axis=1)
+
+            # Classification Report
+            st.text("Classification Report:")
+            report = classification_report(y_test, y_pred, target_names=label_encoder.classes_, output_dict=True)
+            st.dataframe(pd.DataFrame(report).transpose())
+
+            # Confusion Matrix
+            st.text("Confusion Matrix:")
+            cm = confusion_matrix(y_test, y_pred)
+            fig_cm, ax_cm = plt.subplots()
+            sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=label_encoder.classes_, yticklabels=label_encoder.classes_)
+            plt.xlabel("Predicted")
+            plt.ylabel("Actual")
+            st.pyplot(fig_cm)
+
+            # Plot Training History
+            st.subheader("Training History")
+            fig_hist, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+            ax1.plot(history.history['accuracy'], label='Train Accuracy')
+            ax1.plot(history.history['val_accuracy'], label='Validation Accuracy')
+            ax1.set_title('Model Accuracy')
+            ax1.set_xlabel('Epoch')
+            ax1.set_ylabel('Accuracy')
+            ax1.legend()
+
+            ax2.plot(history.history['loss'], label='Train Loss')
+            ax2.plot(history.history['val_loss'], label='Validation Loss')
+            ax2.set_title('Model Loss')
+            ax2.set_xlabel('Epoch')
+            ax2.set_ylabel('Loss')
+            ax2.legend()
+            st.pyplot(fig_hist)
+
+
+else:
+    st.warning("Could not load the dataset. Please check the URL or your connection.")
