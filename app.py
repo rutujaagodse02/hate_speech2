@@ -16,6 +16,18 @@ import seaborn as sns
 from wordcloud import WordCloud
 import requests
 from io import BytesIO
+import tempfile
+import os
+
+# Initialize session state for model, tokenizer, and encoder
+if 'model' not in st.session_state:
+    st.session_state.model = None
+if 'tokenizer' not in st.session_state:
+    st.session_state.tokenizer = None
+if 'label_encoder' not in st.session_state:
+    st.session_state.label_encoder = None
+if 'max_len' not in st.session_state:
+    st.session_state.max_len = 150
 
 # Title for the Streamlit app
 st.set_page_config(layout="wide")
@@ -39,6 +51,25 @@ def load_data():
 
 data = load_data()
 
+# --- Text Preprocessing Functions ---
+bengali_stopwords = [
+    'এবং', 'ও', 'আর', 'বা', 'কিংবা', 'হয়', 'হচ্ছে', 'হয়েছে', 'ছিল', 'আছে', 'এই',
+    'সেই', 'যে', 'সে', 'কি', 'কে', 'কোন', 'কার', 'কাকে', 'আমি', 'তুমি', 'সে',
+    'আমার', 'তোমার', 'তার', 'আমাদের', 'তোমাদের', 'তাদের', 'জন্য', 'থেকে', 'সঙ্গে',
+    'দ্বারা', 'কাছে', 'দিকে', 'মধ্যে', 'উপরে', 'নিচে', 'পরে', 'আগে', 'এক', 'দুই'
+]
+
+def preprocess_text(text):
+    if not isinstance(text, str):
+        return ""
+    text = re.sub(r'http\S+|www\S+|https\S+', '', text, flags=re.MULTILINE)
+    text = re.sub(r'\@\w+|\#','', text)
+    text = re.sub(r'[^\u0980-\u09FF\s]', '', text)
+    text = re.sub(r'\s+', ' ', text).strip()
+    tokens = text.split()
+    tokens = [word for word in tokens if word not in bengali_stopwords]
+    return " ".join(tokens)
+
 if data is not None:
     col1, col2 = st.columns(2)
     with col1:
@@ -58,25 +89,6 @@ if data is not None:
         st.pyplot(fig)
 
     st.subheader("Text Preprocessing")
-    
-    bengali_stopwords = [
-        'এবং', 'ও', 'আর', 'বা', 'কিংবা', 'হয়', 'হচ্ছে', 'হয়েছে', 'ছিল', 'আছে', 'এই',
-        'সেই', 'যে', 'সে', 'কি', 'কে', 'কোন', 'কার', 'কাকে', 'আমি', 'তুমি', 'সে',
-        'আমার', 'তোমার', 'তার', 'আমাদের', 'তোমাদের', 'তাদের', 'জন্য', 'থেকে', 'সঙ্গে',
-        'দ্বারা', 'কাছে', 'দিকে', 'মধ্যে', 'উপরে', 'নিচে', 'পরে', 'আগে', 'এক', 'দুই'
-    ]
-
-    def preprocess_text(text):
-        if not isinstance(text, str):
-            return ""
-        text = re.sub(r'http\S+|www\S+|https\S+', '', text, flags=re.MULTILINE)
-        text = re.sub(r'\@\w+|\#','', text)
-        text = re.sub(r'[^\u0980-\u09FF\s]', '', text)
-        text = re.sub(r'\s+', ' ', text).strip()
-        tokens = text.split()
-        tokens = [word for word in tokens if word not in bengali_stopwords]
-        return " ".join(tokens)
-
     data['cleaned_text'] = data['text'].apply(preprocess_text)
     
     st.markdown("Applied the following preprocessing steps:")
@@ -86,21 +98,27 @@ if data is not None:
     st.write("#### Cleaned Text Preview:")
     st.write(data[['text', 'cleaned_text']].head())
 
-    st.markdown("#### Word Cloud from Hate Speech Text")
-    hate_speech_text = " ".join(text for text in data[data['label'] != 'Not hate']['cleaned_text'])
+    st.markdown("#### Word Cloud from Non-Hate Speech Text")
+    hate_speech_text = " ".join(text for text in data[data['label'] == 'Not hate']['cleaned_text'])
     
     font_url = 'https://github.com/google/fonts/raw/main/ofl/solaimanlipi/SolaimanLipi.ttf'
     try:
         response = requests.get(font_url)
-        font_bytes = BytesIO(response.content)
+        # Save font to a temporary file
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.ttf') as fp:
+            fp.write(response.content)
+            font_path = fp.name
+        
         wordcloud = WordCloud(
-            font_path=font_bytes, width=800, height=400,
+            font_path=font_path, width=800, height=400,
             background_color='white', collocations=False
         ).generate(hate_speech_text)
+        
         fig_wc, ax_wc = plt.subplots()
         ax_wc.imshow(wordcloud, interpolation='bilinear')
         ax_wc.axis('off')
         st.pyplot(fig_wc)
+        os.remove(font_path) # Clean up the temporary file
     except Exception as e:
         st.warning(f"Could not generate word cloud. Error: {e}")
 
@@ -116,11 +134,10 @@ if data is not None:
             num_classes = len(label_encoder.classes_)
 
             max_words = 10000
-            max_len = 150
             tokenizer = Tokenizer(num_words=max_words)
             tokenizer.fit_on_texts(texts)
             sequences = tokenizer.texts_to_sequences(texts)
-            padded_sequences = pad_sequences(sequences, maxlen=max_len)
+            padded_sequences = pad_sequences(sequences, maxlen=st.session_state.max_len)
 
             X_train, X_test, y_train, y_test = train_test_split(padded_sequences, encoded_labels, test_size=0.2, random_state=42, stratify=encoded_labels)
             
@@ -134,17 +151,12 @@ if data is not None:
                 def build(self, input_shape):
                     self.input_num_capsules = input_shape[1]
                     self.input_dim_capsule = input_shape[2]
-                    self.W = self.add_weight(
-                        shape=[self.num_capsules, self.input_num_capsules, self.dim_capsule, self.input_dim_capsule],
-                        initializer='glorot_uniform',
-                        name='W'
-                    )
+                    self.W = self.add_weight(shape=[self.num_capsules, self.input_num_capsules, self.dim_capsule, self.input_dim_capsule], initializer='glorot_uniform', name='W')
                     self.built = True
 
                 def call(self, inputs, training=None):
                     inputs_hat = tf.einsum('bij,kimj->bkim', inputs, self.W)
                     b = tf.zeros(shape=[tf.shape(inputs_hat)[0], self.num_capsules, self.input_num_capsules])
-                    
                     for i in range(self.routings):
                         c = tf.nn.softmax(b, axis=1)
                         s_j = tf.einsum('bki,bkim->bkm', c, inputs_hat)
@@ -169,8 +181,8 @@ if data is not None:
             embedding_dim = 128
             gru_units = 64
             
-            input_layer = Input(shape=(max_len,))
-            embedding_layer = Embedding(max_words, embedding_dim, input_length=max_len)(input_layer)
+            input_layer = Input(shape=(st.session_state.max_len,))
+            embedding_layer = Embedding(max_words, embedding_dim, input_length=st.session_state.max_len)(input_layer)
             gru_layer = Bidirectional(GRU(gru_units, return_sequences=True))(embedding_layer)
             capsule = CapsuleLayer(num_capsules=num_classes, dim_capsule=16, routings=3)(gru_layer)
             output = Lambda(Length)(capsule)
@@ -184,6 +196,11 @@ if data is not None:
             st.text("\n".join(model_summary_list))
 
             history = model.fit(X_train, y_train, batch_size=64, epochs=5, validation_split=0.1)
+            
+            # Save model, tokenizer, and encoder to session state
+            st.session_state.model = model
+            st.session_state.tokenizer = tokenizer
+            st.session_state.label_encoder = label_encoder
 
             st.success("Model training completed!")
 
@@ -224,6 +241,27 @@ if data is not None:
             ax2.legend()
             st.pyplot(fig_hist)
 
+if st.session_state.model is not None:
+    st.subheader("Test with Custom Input")
+    custom_text = st.text_area("Enter Bengali text to classify:")
+    if st.button("Classify Text"):
+        if custom_text:
+            # Preprocess, tokenize, and pad the custom text
+            cleaned_text = preprocess_text(custom_text)
+            sequence = st.session_state.tokenizer.texts_to_sequences([cleaned_text])
+            padded_sequence = pad_sequences(sequence, maxlen=st.session_state.max_len)
+            
+            # Predict
+            prediction_probs = st.session_state.model.predict(padded_sequence)
+            prediction = np.argmax(prediction_probs, axis=1)
+            
+            # Decode and display the result
+            predicted_label = st.session_state.label_encoder.inverse_transform(prediction)[0]
+            st.success(f"Predicted Label: **{predicted_label}**")
+        else:
+            st.warning("Please enter some text to classify.")
+
 else:
-    st.warning("Could not load the dataset. Please ensure 'bengali_hate_speech_with_explicitness.csv' is in the correct directory.")
+    if data is None:
+        st.warning("Could not load the dataset. Please ensure 'bengali_hate_speech_with_explicitness.csv' is in the correct directory.")
 
