@@ -99,7 +99,7 @@ st.sidebar.markdown("---")
 
 if analysis_choice == "Exploratory Data Analysis":
     st.header("📊 Exploratory Data Analysis")
-    st.info("This section displays the structure and distributions within your new Bengali dataset.")
+    st.info("This section displays the structure and distributions within your uploaded dataset.")
     
     st.subheader("Dataset Preview")
     st.dataframe(data) # Display the full loaded dataframe
