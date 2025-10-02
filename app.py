@@ -36,10 +36,13 @@ st.markdown("This application trains a Bidirectional GRU (RNN) model to detect h
 # Function to load data from a local CSV file
 @st.cache_data
 def load_data():
-    file_path = 'bengali_hate_speech_with_explicitness.csv'
+    file_path = 'bengali.csv' # Updated file path
     try:
         df = pd.read_csv(file_path)
-        df.dropna(subset=['text', 'label'], inplace=True)
+        # Using new column names 'sentence' and 'hate'
+        df.dropna(subset=['sentence', 'hate'], inplace=True)
+        # Map numerical hate labels to string labels for clarity
+        df['hate_label'] = df['hate'].map({0: 'Not Hate', 1: 'Hate'})
         return df
     except FileNotFoundError:
         st.error(f"Error: The file '{file_path}' was not found. Please make sure it is in the same directory as app.py.")
@@ -82,23 +85,26 @@ if data is not None:
         st.subheader("Data Visualization")
         st.markdown("#### Distribution of Labels")
         fig, ax = plt.subplots()
-        sns.countplot(x='label', data=data, ax=ax)
+        # Visualize the new 'hate_label' column
+        sns.countplot(x='hate_label', data=data, ax=ax)
         plt.xticks(rotation=45, ha='right')
         plt.tight_layout()
         st.pyplot(fig)
 
     st.subheader("Text Preprocessing")
-    data['cleaned_text'] = data['text'].apply(preprocess_text)
+    # Apply preprocessing to the 'sentence' column
+    data['cleaned_text'] = data['sentence'].apply(preprocess_text)
     
     st.markdown("Applied the following preprocessing steps:")
     st.markdown("- Removed URLs, mentions, and hashtags.")
     st.markdown("- Removed punctuation and numbers, keeping only Bengali characters.")
     st.markdown("- Removed common Bengali stopwords and extra whitespace.")
     st.write("#### Cleaned Text Preview:")
-    st.write(data[['text', 'cleaned_text']].head())
+    st.write(data[['sentence', 'cleaned_text']].head())
 
     st.markdown("#### Word Cloud from Hate Speech Text")
-    hate_speech_text = " ".join(text for text in data[data['label'] != 'Not hate']['cleaned_text']).strip()
+    # Generate word cloud from sentences where hate == 1
+    hate_speech_text = " ".join(text for text in data[data['hate'] == 1]['cleaned_text']).strip()
     
     if hate_speech_text:
         font_url = 'https://github.com/google/fonts/raw/main/ofl/solaimanlipi/SolaimanLipi.ttf'
@@ -128,7 +134,8 @@ if data is not None:
     if st.button("Start Training"):
         with st.spinner("Training in progress... This may take a few minutes."):
             texts = data['cleaned_text'].values
-            labels = data['label'].values
+            # Use the new 'hate_label' as the target
+            labels = data['hate_label'].values
 
             label_encoder = LabelEncoder()
             encoded_labels = label_encoder.fit_transform(labels)
@@ -227,5 +234,5 @@ if st.session_state.model is not None:
 
 else:
     if data is None:
-        st.warning("Could not load the dataset. Please ensure 'bengali_hate_speech_with_explicitness.csv' is in the correct directory.")
+        st.warning("Could not load the dataset. Please ensure 'bengali.csv' is in the correct directory.")
 
