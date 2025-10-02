@@ -14,25 +14,32 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.svm import LinearSVC
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
-from textstat.textstat import textstat
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
 
 # --- Page Configuration ---
 st.set_page_config(
     page_title="Hate Speech Detection Dashboard",
-    page_icon="🗣",
+    page_icon="🗣️",
     layout="wide",
     initial_sidebar_state="expanded",
 )
-st.set_option('deprecation.showPyplotGlobalUse', False)
 
 # --- NLTK Setup ---
-# Download necessary NLTK data (if not already downloaded)
+# This function helps cache the download process
 @st.cache_resource
 def download_nltk_data():
-    nltk.download('punkt', quiet=True)
-    nltk.download('stopwords', quiet=True)
-    nltk.download('vader_lexicon', quiet=True)
+    try:
+        nltk.data.find('corpora/stopwords')
+    except LookupError:
+        nltk.download('stopwords', quiet=True)
+    try:
+        nltk.data.find('tokenizers/punkt')
+    except LookupError:
+        nltk.download('punkt', quiet=True)
+    try:
+        nltk.data.find('sentiment/vader_lexicon.zip')
+    except LookupError:
+        nltk.download('vader_lexicon', quiet=True)
 
 download_nltk_data()
 
@@ -71,23 +78,13 @@ def preprocess_text(tweets_series):
     
     return processed_tweets
 
-@st.cache_data
-def get_sentiment_features(tweets_series):
-    """Generates sentiment polarity scores for tweets."""
-    sid = SentimentIntensityAnalyzer()
-    features = []
-    for tweet in tweets_series:
-        sentiment = sid.polarity_scores(tweet)
-        features.append([sentiment['neg'], sentiment['pos'], sentiment['neu'], sentiment['compound']])
-    return np.array(features)
-
 @st.cache_resource
 def train_models(_X_train, _y_train):
     """Trains multiple classifiers and returns them in a dictionary."""
     models = {
         "Logistic Regression": LogisticRegression(max_iter=1000),
         "Random Forest": RandomForestClassifier(random_state=42),
-        "Linear SVM": LinearSVC(random_state=42, max_iter=2000)
+        "Linear SVM": LinearSVC(random_state=42, dual=True, max_iter=2000) # Added dual=True for newer sklearn versions
     }
     for model in models.values():
         model.fit(_X_train, _y_train)
@@ -99,7 +96,7 @@ def train_models(_X_train, _y_train):
 class_labels = {0: 'Hate Speech', 1: 'Offensive Language', 2: 'Neither'}
 
 # Title and Introduction
-st.title("🗣 Hate Speech Detection Dashboard")
+st.title("🗣️ Hate Speech Detection Dashboard")
 st.markdown("""
 This interactive dashboard analyzes a dataset of tweets to detect hate speech and offensive language. 
 You can explore the dataset, visualize key insights, and compare the performance of different machine learning models.
@@ -119,18 +116,15 @@ analysis_choice = st.sidebar.radio(
     "Go to:",
     ("Exploratory Data Analysis", "Word Cloud Visualizations", "Model Performance Comparison")
 )
-
 st.sidebar.markdown("---")
 
 # --- Section 1: Exploratory Data Analysis ---
 if analysis_choice == "Exploratory Data Analysis":
     st.header("📊 Exploratory Data Analysis")
 
-    # Display raw data
     st.subheader("Dataset Preview")
     st.dataframe(data.head())
 
-    # Display data distribution
     st.subheader("Distribution of Tweet Classes")
     fig, ax = plt.subplots()
     class_counts = data['class'].value_counts()
@@ -139,37 +133,29 @@ if analysis_choice == "Exploratory Data Analysis":
     ax.set_ylabel("Number of Tweets")
     st.pyplot(fig)
     st.markdown("""
-    The dataset is highly imbalanced, with a majority of tweets classified as *Offensive Language*. 
-    This imbalance can pose a challenge for machine learning models, especially in correctly identifying the minority *Hate Speech* class.
+    The dataset is highly imbalanced, with a majority of tweets classified as **Offensive Language**. 
+    This imbalance can pose a challenge for machine learning models, especially in correctly identifying the minority **Hate Speech** class.
     """)
 
-    # Text length analysis
     st.subheader("Tweet Length Analysis by Class")
     fig, ax = plt.subplots(1, 2, figsize=(15, 6))
-    
-    # Histogram
     sns.histplot(data=data, x='text length', hue='class', multiple='stack', palette='viridis', ax=ax[0])
     ax[0].set_title("Distribution of Tweet Lengths")
-    
-    # Boxplot
     sns.boxplot(data=data, x='class', y='text length', palette='viridis', ax=ax[1])
     ax[1].set_title("Box Plot of Tweet Lengths")
     ax[1].set_xticklabels(['Hate', 'Offensive', 'Neither'])
-    
     st.pyplot(fig)
     st.markdown("""
-    The box plot suggests that *Offensive Language* tweets tend to have a slightly wider range of lengths, 
+    The box plot suggests that **Offensive Language** tweets tend to have a slightly wider range of lengths, 
     but the distributions are largely overlapping. Text length alone is not a strong differentiator.
     """)
 
 # --- Section 2: Word Cloud Visualizations ---
 elif analysis_choice == "Word Cloud Visualizations":
-    st.header("☁ Word Cloud Visualizations")
+    st.header("☁️ Word Cloud Visualizations")
     st.markdown("Visualizing the most frequent words in different categories of tweets.")
-
     col1, col2, col3 = st.columns(3)
 
-    # All tweets word cloud
     with col1:
         st.subheader("All Tweets")
         all_words = ' '.join([text for text in data['processed_tweets']])
@@ -179,7 +165,6 @@ elif analysis_choice == "Word Cloud Visualizations":
         ax.axis('off')
         st.pyplot(fig)
 
-    # Offensive language word cloud
     with col2:
         st.subheader("Offensive Language")
         offensive_words = ' '.join([text for text in data['processed_tweets'][data['class'] == 1]])
@@ -189,7 +174,6 @@ elif analysis_choice == "Word Cloud Visualizations":
         ax.axis('off')
         st.pyplot(fig)
 
-    # Hate speech word cloud
     with col3:
         st.subheader("Hate Speech")
         hate_words = ' '.join([text for text in data['processed_tweets'][data['class'] == 0]])
@@ -199,40 +183,29 @@ elif analysis_choice == "Word Cloud Visualizations":
         ax.axis('off')
         st.pyplot(fig)
 
-
 # --- Section 3: Model Performance Comparison ---
 elif analysis_choice == "Model Performance Comparison":
     st.header("🤖 Model Performance Comparison")
     st.markdown("""
     Here, we train several machine learning models and evaluate their performance on the task of classifying tweets. 
-    We use *TF-IDF* (Term Frequency-Inverse Document Frequency) to convert text into numerical features.
+    We use **TF-IDF** (Term Frequency-Inverse Document Frequency) to convert text into numerical features.
     """)
 
-    # Feature Engineering
     tfidf_vectorizer = TfidfVectorizer(ngram_range=(1, 2), max_df=0.75, min_df=5, max_features=10000)
     X_tfidf = tfidf_vectorizer.fit_transform(data['processed_tweets'])
     y = data['class']
 
-    # Train-test split
     X_train, X_test, y_train, y_test = train_test_split(X_tfidf, y, random_state=42, test_size=0.2, stratify=y)
     
-    # Train models
     with st.spinner("Training models... This may take a moment."):
         models = train_models(X_train, y_train)
 
-    # Model selection for detailed view
     st.sidebar.header("Select a Model for Details")
-    selected_model = st.sidebar.selectbox(
-        "Choose a model to inspect:",
-        list(models.keys())
-    )
-
-    # --- Display Model Performance ---
+    selected_model = st.sidebar.selectbox("Choose a model to inspect:", list(models.keys()))
+    
     st.subheader("Overall Accuracy Comparison")
-
     accuracies = {name: accuracy_score(y_test, model.predict(X_test)) for name, model in models.items()}
     accuracy_df = pd.DataFrame(accuracies.items(), columns=["Model", "Accuracy"])
-
     fig, ax = plt.subplots()
     sns.barplot(x="Model", y="Accuracy", data=accuracy_df, ax=ax, palette='mako')
     ax.set_title("Model Accuracy Comparison")
@@ -240,17 +213,14 @@ elif analysis_choice == "Model Performance Comparison":
     st.pyplot(fig)
 
     st.subheader(f"Detailed Performance: {selected_model}")
-    
     model = models[selected_model]
     y_preds = model.predict(X_test)
     
-    # Classification Report
     st.text("Classification Report")
     report = classification_report(y_test, y_preds, target_names=['Hate', 'Offensive', 'Neither'], output_dict=True)
     report_df = pd.DataFrame(report).transpose()
     st.dataframe(report_df.style.format("{:.2f}"))
 
-    # Confusion Matrix
     st.text("Confusion Matrix")
     cm = confusion_matrix(y_test, y_preds)
     fig, ax = plt.subplots()
@@ -261,32 +231,27 @@ elif analysis_choice == "Model Performance Comparison":
     ax.set_ylabel("Actual")
     st.pyplot(fig)
     st.markdown("""
-    *Key Observations:*
-    - All models achieve high overall accuracy, largely due to their strong performance on the majority *Offensive Language* class.
-    - The *Hate Speech* class (class 0) is the most challenging to predict, often being misclassified as Offensive. This is reflected in its lower precision and recall scores.
-    - The confusion matrix clearly shows this misclassification pattern. Improving the model's ability to distinguish between these two classes is the primary challenge.
+    **Key Observations:**
+    - All models achieve high overall accuracy, largely due to their strong performance on the majority **Offensive Language** class.
+    - The **Hate Speech** class (class 0) is the most challenging to predict, often being misclassified as Offensive. This is reflected in its lower precision and recall scores.
     """)
 
-    # Live Prediction
     st.sidebar.markdown("---")
     st.sidebar.header("Try a Live Prediction")
     user_input = st.sidebar.text_area("Enter a text snippet to classify:")
     if st.sidebar.button("Classify"):
         if user_input:
-            # Preprocess and vectorize the input
             processed_input = preprocess_text([user_input])
             vectorized_input = tfidf_vectorizer.transform(processed_input)
-            
-            # Predict
             prediction = models[selected_model].predict(vectorized_input)
             prediction_label = class_labels[prediction[0]]
             
             st.sidebar.subheader("Prediction Result")
             if prediction_label == 'Hate Speech':
-                st.sidebar.error(f"Predicted Class: *{prediction_label}*")
+                st.sidebar.error(f"Predicted Class: **{prediction_label}**")
             elif prediction_label == 'Offensive Language':
-                 st.sidebar.warning(f"Predicted Class: *{prediction_label}*")
+                 st.sidebar.warning(f"Predicted Class: **{prediction_label}**")
             else:
-                st.sidebar.success(f"Predicted Class: *{prediction_label}*")
+                st.sidebar.success(f"Predicted Class: **{prediction_label}**")
         else:
             st.sidebar.write("Please enter some text to classify.")
