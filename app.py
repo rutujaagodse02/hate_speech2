@@ -98,29 +98,33 @@ if data is not None:
     st.write("#### Cleaned Text Preview:")
     st.write(data[['text', 'cleaned_text']].head())
 
-    st.markdown("#### Word Cloud from Non-Hate Speech Text")
-    hate_speech_text = " ".join(text for text in data[data['label'] == 'Not hate']['cleaned_text'])
+    st.markdown("#### Word Cloud from Hate Speech Text")
+    hate_speech_text = " ".join(text for text in data[data['label'] != 'Not hate']['cleaned_text']).strip()
     
-    font_url = 'https://github.com/google/fonts/raw/main/ofl/solaimanlipi/SolaimanLipi.ttf'
-    try:
-        response = requests.get(font_url)
-        # Save font to a temporary file
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.ttf') as fp:
-            fp.write(response.content)
-            font_path = fp.name
-        
-        wordcloud = WordCloud(
-            font_path=font_path, width=800, height=400,
-            background_color='white', collocations=False
-        ).generate(hate_speech_text)
-        
-        fig_wc, ax_wc = plt.subplots()
-        ax_wc.imshow(wordcloud, interpolation='bilinear')
-        ax_wc.axis('off')
-        st.pyplot(fig_wc)
-        os.remove(font_path) # Clean up the temporary file
-    except Exception as e:
-        st.warning(f"Could not generate word cloud. Error: {e}")
+    # Check if there is any text to generate the word cloud from
+    if hate_speech_text:
+        font_url = 'https://github.com/google/fonts/raw/main/ofl/solaimanlipi/SolaimanLipi.ttf'
+        try:
+            response = requests.get(font_url)
+            # Save font to a temporary file
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.ttf') as fp:
+                fp.write(response.content)
+                font_path = fp.name
+            
+            wordcloud = WordCloud(
+                font_path=font_path, width=800, height=400,
+                background_color='white', collocations=False
+            ).generate(hate_speech_text)
+            
+            fig_wc, ax_wc = plt.subplots()
+            ax_wc.imshow(wordcloud, interpolation='bilinear')
+            ax_wc.axis('off')
+            st.pyplot(fig_wc)
+            os.remove(font_path) # Clean up the temporary file
+        except Exception as e:
+            st.warning(f"Could not generate word cloud. Error: {e}")
+    else:
+        st.info("No words found to generate a word cloud for the hate speech category after preprocessing.")
 
     st.subheader("Model Training: Capsule Network with GRU")
 
@@ -264,4 +268,5 @@ if st.session_state.model is not None:
 else:
     if data is None:
         st.warning("Could not load the dataset. Please ensure 'bengali_hate_speech_with_explicitness.csv' is in the correct directory.")
+
 
