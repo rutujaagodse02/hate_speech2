@@ -1,9 +1,9 @@
 streamlit
 pandas
 numpy
-nltk
 scikit-learn
+tensorflow
+matplotlib
 seaborn
 wordcloud
-matplotlib
-sentence-transformers
+requests
