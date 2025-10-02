@@ -25,7 +25,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# --- Model Loading ---
+# --- Model Loading (Cached for performance) ---
 @st.cache_resource
 def load_semantic_model():
     """Loads the Multilingual SentenceTransformer model."""
@@ -42,9 +42,8 @@ def load_data():
     except FileNotFoundError:
         st.error("FATAL ERROR: 'bengali_hate_speech_with_explicitness.csv' not found. Please ensure the file is in your GitHub repository's main directory.")
         st.stop()
-    # Drop rows where 'text' or 'label' is missing
+    # Drop rows where 'text' or 'label' is missing to prevent errors
     data.dropna(subset=['text', 'label'], inplace=True)
-    data['text length'] = data['text'].astype(str).apply(len)
     return data
 
 def preprocess_bengali_text(texts):
@@ -88,7 +87,7 @@ def train_classifier(_X_train, _y_train):
 
 # --- Main Application UI ---
 st.title("🇧🇩 Bengali Hate Speech Detection Dashboard")
-st.markdown("This app analyzes the `bengali_hate_speech_with_explicitness.csv` dataset.")
+st.markdown("Analysis of the `bengali_hate_speech_with_explicitness.csv` dataset.")
 
 data = load_data()
 
@@ -100,10 +99,10 @@ st.sidebar.markdown("---")
 
 if analysis_choice == "Exploratory Data Analysis":
     st.header("📊 Exploratory Data Analysis")
-    st.info("This section displays the structure and distributions within your dataset.")
+    st.info("This section displays the structure and distributions within your new Bengali dataset.")
     
     st.subheader("Dataset Preview")
-    st.dataframe(data.head())
+    st.dataframe(data) # Display the full loaded dataframe
     
     # Create columns for side-by-side charts
     col1, col2 = st.columns(2)
@@ -112,7 +111,7 @@ if analysis_choice == "Exploratory Data Analysis":
         st.subheader("Distribution of 'label'")
         fig, ax = plt.subplots()
         label_counts = data['label'].value_counts()
-        sns.barplot(x=label_counts.index, y=label_counts.values, ax=ax)
+        sns.barplot(x=label_counts.index, y=label_counts.values, ax=ax, palette="rocket")
         ax.set_title("Content Labels")
         ax.set_ylabel("Count")
         plt.xticks(rotation=45, ha='right')
