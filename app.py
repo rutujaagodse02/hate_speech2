@@ -169,7 +169,7 @@ if data is not None:
             model.summary(print_fn=lambda x: model_summary_list.append(x))
             st.text("\n".join(model_summary_list))
 
-            history = model.fit(X_train, y_train, batch_size=64, epochs=10, validation_split=0.1)
+            history = model.fit(X_train, y_train, batch_size=64, epochs=5, validation_split=0.1)
             
             # Save model, tokenizer, and encoder to session state
             st.session_state.model = model
