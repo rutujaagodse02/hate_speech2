@@ -84,7 +84,8 @@ def preprocess_text(tweets_series):
 def create_hybrid_features(_data):
     """Generates and combines TF-IDF and Semantic features."""
     tfidf_vectorizer = TfidfVectorizer(ngram_range=(1, 2), max_df=0.75, min_df=5, max_features=5000)
-    X_tfidf = tffidf_vectorizer.fit_transform(_data['processed_tweets'])
+    # CORRECTED LINE: The typo 'tffidf_vectorizer' is now 'tfidf_vectorizer'
+    X_tfidf = tfidf_vectorizer.fit_transform(_data['processed_tweets'])
     X_semantic = semantic_model.encode(_data['tweet'].tolist(), show_progress_bar=False)
     X_combined = hstack([X_tfidf, csr_matrix(X_semantic)]).tocsr()
     return X_combined, _data['class'], tfidf_vectorizer
