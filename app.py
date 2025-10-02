@@ -195,6 +195,7 @@
 #         ax.axis('off')
 #         st.pyplot(fig)
 # app.py
+# app.py
 
 import streamlit as st
 import pandas as pd
@@ -239,20 +240,20 @@ def load_data():
     except FileNotFoundError:
         st.error("FATAL ERROR: 'bengali_hate_speech_with_explicitness.csv' not found. Please ensure the file is in your GitHub repository's main directory.")
         st.stop()
+    # Add a text length column based on the 'text' field
+    data['text length'] = data['text'].astype(str).apply(len)
     return data
 
 def preprocess_bengali_text(texts):
-    """Cleans and preprocesses Bengali text."""
-    # Common Bengali stopwords (this list can be expanded)
+    """Cleans and preprocesses Bengali text for TF-IDF."""
     stopwords = set(['এবং', 'একটি', 'এই', 'ও', 'থেকে', 'জন্য', 'জে', 'করুন', 'আপনার', 'সব', 'কে', 'সে', 'কি', 'তার', 'তিনি', 'আমি', 'আপনি'])
     
     processed_texts = []
     for text in texts:
+        text = str(text) # Ensure text is a string
         text = re.sub(r'http[s]?://\S+', '', text) # remove URLs
-        # Remove non-Bengali characters and numbers, keeping spaces
-        text = re.sub(r'[^\u0980-\u09FF\s]', '', text)
+        text = re.sub(r'[^\u0980-\u09FF\s]', '', text) # Remove non-Bengali characters
         tokens = text.split()
-        # Remove stopwords
         tokens = [word for word in tokens if word not in stopwords]
         processed_texts.append(" ".join(tokens))
     return processed_texts
@@ -260,8 +261,7 @@ def preprocess_bengali_text(texts):
 # --- Feature Engineering and Model Training ---
 @st.cache_data
 def create_hybrid_features(_data, _text_col, _label_col):
-    """Generates TF-IDF and Semantic features for Bengali text."""
-    # Preprocess text for TF-IDF
+    """Generates features and encodes labels for Bengali text."""
     _data['processed_text'] = preprocess_bengali_text(_data[_text_col])
     
     tfidf_vectorizer = TfidfVectorizer(ngram_range=(1, 2), max_df=0.9, min_df=3, max_features=5000)
@@ -271,7 +271,6 @@ def create_hybrid_features(_data, _text_col, _label_col):
     
     X_combined = hstack([X_tfidf, csr_matrix(X_semantic)]).tocsr()
     
-    # Encode string labels into numbers
     le = LabelEncoder()
     y_encoded = le.fit_transform(_data[_label_col])
     
@@ -342,7 +341,9 @@ if analysis_choice == "Model Performance":
             st.sidebar.write("Please enter some text.")
 
 elif analysis_choice == "Exploratory Data Analysis":
+    # --- THIS SECTION IS NOW FULLY CORRECTED FOR THE BENGALI DATASET ---
     st.header("📊 Exploratory Data Analysis")
+    
     st.subheader("Dataset Preview")
     st.dataframe(data.head())
     
@@ -352,28 +353,39 @@ elif analysis_choice == "Exploratory Data Analysis":
     sns.barplot(x=class_counts.index, y=class_counts.values, ax=ax)
     ax.set_title("Number of Texts per Label")
     ax.set_ylabel("Count")
-    plt.xticks(rotation=45)
+    plt.xticks(rotation=45, ha='right')
+    st.pyplot(fig)
+
+    st.subheader("Text Length Analysis by Label")
+    fig, ax = plt.subplots(1, 2, figsize=(15, 6))
+    sns.histplot(data=data, x='text length', hue='label', multiple='stack', palette='viridis', ax=ax[0])
+    ax[0].set_title("Distribution of Text Lengths")
+    sns.boxplot(data=data, x='label', y='text length', palette='viridis', ax=ax[1])
+    ax[1].set_title("Box Plot of Text Lengths")
+    plt.sca(ax[1])
+    plt.xticks(rotation=45, ha='right')
+    plt.tight_layout()
     st.pyplot(fig)
 
 elif analysis_choice == "Word Cloud Visualizations":
+    # --- THIS SECTION IS NOW FULLY CORRECTED FOR THE BENGALI DATASET ---
     st.header("☁️ Word Cloud Visualizations")
-    st.info("Displaying the most frequent words in the processed Bengali text.")
     
-    # Check if font file exists
     font_path = 'Nikosh.ttf'
     try:
-        # Test if the font can be loaded
         f = open(font_path, 'rb')
         f.close()
     except FileNotFoundError:
         st.error(f"FATAL ERROR: Font file 'Nikosh.ttf' not found. Please upload it to your GitHub repository.")
         st.stop()
         
-    data['processed_text'] = preprocess_bengali_text(data['text'])
+    # Ensure processed text exists for word cloud
+    if 'processed_text' not in data.columns:
+        data['processed_text'] = preprocess_bengali_text(data['text'])
     
+    # Word cloud for all text
     st.subheader("Word Cloud for All Text")
     all_words = ' '.join([text for text in data['processed_text']])
-    
     if all_words.strip():
         wordcloud = WordCloud(width=800, height=500, background_color='white', font_path=font_path).generate(all_words)
         fig, ax = plt.subplots()
@@ -381,5 +393,20 @@ elif analysis_choice == "Word Cloud Visualizations":
         ax.axis('off')
         st.pyplot(fig)
     else:
-        st.warning("Not enough words to generate a word cloud.")
+        st.warning("Not enough words to generate a word cloud for all text.")
+        
+    # Word clouds for each label
+    st.subheader("Word Clouds by Label")
+    labels = data['label'].unique()
+    for label in labels:
+        st.markdown(f"**Label: {label}**")
+        text_subset = ' '.join([text for text in data['processed_text'][data['label'] == label]])
+        if text_subset.strip():
+            wordcloud = WordCloud(width=600, height=400, background_color='white', font_path=font_path).generate(text_subset)
+            fig, ax = plt.subplots()
+            ax.imshow(wordcloud, interpolation='bilinear')
+            ax.axis('off')
+            st.pyplot(fig)
+        else:
+            st.warning(f"Not enough words to generate a word cloud for the '{label}' label.")
 
