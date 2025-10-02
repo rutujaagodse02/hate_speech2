@@ -1,3 +1,5 @@
+# app.py
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -10,12 +12,11 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 
-# Advanced Model Imports
+# Advanced Model Import
 from sentence_transformers import SentenceTransformer
-from detoxify import Detoxify
-import xgboost as xgb
 from scipy.sparse import hstack, csr_matrix
 
 # --- Page Configuration ---
@@ -29,6 +30,7 @@ st.set_page_config(
 # --- NLTK and Model Setup ---
 @st.cache_resource
 def download_nltk_data():
+    """Downloads necessary NLTK data if not already present."""
     try:
         nltk.data.find('corpora/stopwords')
     except LookupError:
@@ -39,23 +41,26 @@ def download_nltk_data():
         nltk.download('punkt', quiet=True)
 
 @st.cache_resource
-def load_models():
-    """Loads all necessary models into memory."""
-    semantic_model = SentenceTransformer('all-MiniLM-L6-v2')
-    toxicity_model = Detoxify('original')
-    return semantic_model, toxicity_model
+def load_semantic_model():
+    """Loads the SentenceTransformer model into memory and caches it."""
+    return SentenceTransformer('all-MiniLM-L6-v2')
 
+# Initial setup runs once
 download_nltk_data()
-semantic_model, toxicity_model = load_models()
+semantic_model = load_semantic_model()
 
 
-# --- Caching Functions for Performance ---
+# --- Data Loading and Preprocessing Functions ---
 @st.cache_data
 def load_data():
-    """Loads and preprocesses the dataset."""
-    data = pd.read_csv("HateSpeechData.csv")
+    """Loads the dataset from a CSV file and includes error handling."""
+    try:
+        data = pd.read_csv("HateSpeechData.csv")
+    except FileNotFoundError:
+        st.error("FATAL ERROR: 'HateSpeechData.csv' not found. Please ensure the file is in your GitHub repository's main directory and the name matches exactly.")
+        st.stop()  # Stop the app from running further
+        
     data['text length'] = data['tweet'].apply(len)
-    data['processed_tweets'] = preprocess_text(data['tweet'])
     return data
 
 def preprocess_text(tweets_series):
@@ -74,74 +79,52 @@ def preprocess_text(tweets_series):
         processed_tweets.append(" ".join(tokens))
     return processed_tweets
 
-# --- Advanced Feature Engineering Functions ---
+# --- Feature Engineering and Model Training ---
 @st.cache_data
-def get_semantic_features(_tweets_series):
-    """Generates sentence embeddings."""
-    with st.spinner("Generating semantic features..."):
-        embeddings = semantic_model.encode(_tweets_series.tolist(), show_progress_bar=False)
-    return embeddings
+def create_hybrid_features(_data):
+    """Generates and combines TF-IDF and Semantic features."""
+    tfidf_vectorizer = TfidfVectorizer(ngram_range=(1, 2), max_df=0.75, min_df=5, max_features=5000)
+    X_tfidf = tffidf_vectorizer.fit_transform(_data['processed_tweets'])
+    X_semantic = semantic_model.encode(_data['tweet'].tolist(), show_progress_bar=False)
+    X_combined = hstack([X_tfidf, csr_matrix(X_semantic)]).tocsr()
+    return X_combined, _data['class'], tfidf_vectorizer
 
-@st.cache_data
-def get_toxicity_features(_tweets_series):
-    """Generates toxicity scores."""
-    with st.spinner("Generating toxicity features..."):
-        # Detoxify expects a list of strings
-        toxicity_scores = toxicity_model.predict(_tweets_series.tolist())
-    # Convert dictionary of lists to a DataFrame, then to a numpy array
-    return pd.DataFrame(toxicity_scores).values
+@st.cache_resource
+def train_classifier(_X_train, _y_train):
+    """Trains a Logistic Regression model."""
+    model = LogisticRegression(max_iter=1000, random_state=42)
+    model.fit(_X_train, _y_train)
+    return model
 
-# --- Main Application Logic ---
+# --- Main Application UI ---
 class_labels = {0: 'Hate Speech', 1: 'Offensive Language', 2: 'Neither'}
+
 st.title("🗣️ Advanced Hate Speech Detection Dashboard")
-st.markdown("This dashboard uses a **hybrid feature model** (TF-IDF, Semantic & Toxicity) with an **XGBoost classifier**.")
+st.markdown("An NLP project using a **hybrid feature model** (TF-IDF + Semantic Embeddings).")
 
 data = load_data()
+data['processed_tweets'] = preprocess_text(data['tweet'])
 
-# --- Sidebar ---
 st.sidebar.title("Dashboard Controls")
 st.sidebar.markdown("---")
 analysis_choice = st.sidebar.radio("Go to:", ("Model Performance", "Exploratory Data Analysis", "Word Cloud Visualizations"))
 st.sidebar.markdown("---")
 
-
-# --- Section: Model Performance (Now the main section) ---
 if analysis_choice == "Model Performance":
-    st.header("🚀 Advanced Model Performance")
-
-    # 1. TF-IDF Features
-    tfidf_vectorizer = TfidfVectorizer(ngram_range=(1, 2), max_df=0.75, min_df=5, max_features=5000)
-    X_tfidf = tfidf_vectorizer.fit_transform(data['processed_tweets'])
-
-    # 2. Semantic Features
-    X_semantic = get_semantic_features(data['tweet'])
-
-    # 3. Toxicity Features
-    X_toxicity = get_toxicity_features(data['tweet'])
-
-    # 4. Combine all features
-    # Use hstack for sparse (TF-IDF) and dense matrices
-    X_combined = hstack([X_tfidf, csr_matrix(X_semantic), csr_matrix(X_toxicity)]).tocsr()
-    y = data['class']
-
-    # Train-Test Split
-    X_train, X_test, y_train, y_test = train_test_split(X_combined, y, random_state=42, test_size=0.2, stratify=y)
-
-    # Train XGBoost Model
-    with st.spinner("Training XGBoost model... This is computationally intensive."):
-        xgb_model = xgb.XGBClassifier(objective='multi:softmax', num_class=3, n_estimators=100, learning_rate=0.1, max_depth=7, use_label_encoder=False, eval_metric='mlogloss')
-        xgb_model.fit(X_train, y_train)
-
-    st.subheader("XGBoost Classifier Performance")
-    y_preds = xgb_model.predict(X_test)
-
-    # Display Metrics
-    st.text(f"Accuracy: {accuracy_score(y_test, y_preds):.4f}")
-    st.text("Classification Report:")
+    st.header("🚀 Model Performance Analysis")
+    with st.spinner("Preparing features and training model... This may take a minute on first run."):
+        X_combined, y, tfidf_vectorizer = create_hybrid_features(data)
+        X_train, X_test, y_train, y_test = train_test_split(X_combined, y, random_state=42, test_size=0.2, stratify=y)
+        model = train_classifier(X_train, y_train)
+    
+    st.success("Model is ready!")
+    st.subheader("Classifier Performance Metrics")
+    y_preds = model.predict(X_test)
+    st.text(f"Overall Accuracy: {accuracy_score(y_test, y_preds):.4f}")
     report = classification_report(y_test, y_preds, target_names=class_labels.values(), output_dict=True)
     st.dataframe(pd.DataFrame(report).transpose().style.format("{:.2f}"))
 
-    st.text("Confusion Matrix:")
+    st.subheader("Confusion Matrix")
     cm = confusion_matrix(y_test, y_preds)
     fig, ax = plt.subplots()
     sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=class_labels.values(), yticklabels=class_labels.values(), ax=ax)
@@ -149,22 +132,17 @@ if analysis_choice == "Model Performance":
     ax.set_ylabel("Actual")
     st.pyplot(fig)
     
-    # --- Live Prediction ---
     st.sidebar.header("Try a Live Prediction")
-    user_input = st.sidebar.text_area("Enter a text snippet to classify:")
+    user_input = st.sidebar.text_area("Enter a text snippet to classify:", key="user_input")
     if st.sidebar.button("Classify"):
         if user_input:
-            # Create all features for the single input
-            input_tfidf = tfidf_vectorizer.transform([preprocess_text([user_input])[0]])
-            input_semantic = semantic_model.encode([user_input])
-            input_toxicity = pd.DataFrame(toxicity_model.predict([user_input])).values
-            
-            # Combine features in the same order
-            input_combined = hstack([input_tfidf, csr_matrix(input_semantic), csr_matrix(input_toxicity)]).tocsr()
-
-            # Predict
-            prediction = xgb_model.predict(input_combined)
-            prediction_label = class_labels[prediction[0]]
+            with st.spinner("Analyzing..."):
+                processed_input = preprocess_text([user_input])
+                input_tfidf = tfidf_vectorizer.transform(processed_input)
+                input_semantic = semantic_model.encode([user_input])
+                input_combined = hstack([input_tfidf, csr_matrix(input_semantic)]).tocsr()
+                prediction = model.predict(input_combined)
+                prediction_label = class_labels[prediction[0]]
             
             st.sidebar.subheader("Prediction Result")
             if prediction_label == 'Hate Speech':
@@ -176,26 +154,42 @@ if analysis_choice == "Model Performance":
         else:
             st.sidebar.write("Please enter some text to classify.")
 
-# --- Other Sections remain the same ---
 elif analysis_choice == "Exploratory Data Analysis":
     st.header("📊 Exploratory Data Analysis")
-    # (Code from your previous version can be pasted here without changes)
     st.subheader("Dataset Preview")
     st.dataframe(data.head())
     st.subheader("Distribution of Tweet Classes")
     fig, ax = plt.subplots()
     class_counts = data['class'].value_counts()
     sns.barplot(x=class_counts.index.map(class_labels), y=class_counts.values, ax=ax)
+    ax.set_title("Number of Tweets per Class")
+    ax.set_ylabel("Number of Tweets")
     st.pyplot(fig)
-
 
 elif analysis_choice == "Word Cloud Visualizations":
     st.header("☁️ Word Cloud Visualizations")
-    # (Code from your previous version can be pasted here without changes)
-    st.subheader("All Tweets")
-    all_words = ' '.join([text for text in data['processed_tweets']])
-    wordcloud_all = WordCloud(width=800, height=800, background_color='white').generate(all_words)
-    fig, ax = plt.subplots()
-    ax.imshow(wordcloud_all, interpolation='bilinear')
-    ax.axis('off')
-    st.pyplot(fig)
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.subheader("All Tweets")
+        all_words = ' '.join([text for text in data['processed_tweets']])
+        wordcloud_all = WordCloud(width=800, height=600, background_color='white').generate(all_words)
+        fig, ax = plt.subplots()
+        ax.imshow(wordcloud_all, interpolation='bilinear')
+        ax.axis('off')
+        st.pyplot(fig)
+    with col2:
+        st.subheader("Offensive Language")
+        offensive_words = ' '.join([text for text in data['processed_tweets'][data['class'] == 1]])
+        wordcloud_offensive = WordCloud(width=800, height=600, background_color='white').generate(offensive_words)
+        fig, ax = plt.subplots()
+        ax.imshow(wordcloud_offensive, interpolation='bilinear')
+        ax.axis('off')
+        st.pyplot(fig)
+    with col3:
+        st.subheader("Hate Speech")
+        hate_words = ' '.join([text for text in data['processed_tweets'][data['class'] == 0]])
+        wordcloud_hate = WordCloud(width=800, height=600, background_color='white').generate(hate_words)
+        fig, ax = plt.subplots()
+        ax.imshow(wordcloud_hate, interpolation='bilinear')
+        ax.axis('off')
+        st.pyplot(fig)
