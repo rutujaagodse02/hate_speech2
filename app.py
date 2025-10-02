@@ -98,8 +98,8 @@ if data is not None:
     st.write("#### Cleaned Text Preview:")
     st.write(data[['text', 'cleaned_text']].head())
 
-    st.markdown("#### Word Cloud from Hate Speech Text")
-    hate_speech_text = " ".join(text for text in data[data['label'] != 'Not hate']['cleaned_text']).strip()
+    # st.markdown("#### Word Cloud from Hate Speech Text")
+    # hate_speech_text = " ".join(text for text in data[data['label'] != 'Not hate']['cleaned_text']).strip()
     
     if hate_speech_text:
         font_url = 'https://github.com/google/fonts/raw/main/ofl/solaimanlipi/SolaimanLipi.ttf'
@@ -266,4 +266,5 @@ if st.session_state.model is not None:
 else:
     if data is None:
         st.warning("Could not load the dataset. Please ensure 'bengali_hate_speech_with_explicitness.csv' is in the correct directory.")
+
 
