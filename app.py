@@ -8,7 +8,7 @@ from sklearn.metrics import classification_report, confusion_matrix
 import tensorflow as tf
 from tensorflow.keras.preprocessing.text import Tokenizer
 from tensorflow.keras.preprocessing.sequence import pad_sequences
-from tensorflow.keras.layers import Layer, Input, Embedding, Bidirectional, GRU, Dense, Lambda
+from tensorflow.keras.layers import Layer, Input, Embedding, Bidirectional, GRU, Dense, Lambda, Dropout
 from tensorflow.keras import backend as K
 from tensorflow.keras.models import Model
 import matplotlib.pyplot as plt
@@ -53,7 +53,7 @@ data = load_data()
 
 # --- Text Preprocessing Functions ---
 bengali_stopwords = [
-    'এবং', 'ও', 'আর', 'বা', 'কিংবা', 'হয়', 'হচ্ছে', 'হয়েছে', 'ছিল', 'আছে', 'এই',
+    'এবং', 'о', 'আর', 'বা', 'কিংবা', 'হয়', 'হচ্ছে', 'হয়েছে', 'ছিল', 'আছে', 'এই',
     'সেই', 'যে', 'সে', 'কি', 'কে', 'কোন', 'কার', 'কাকে', 'আমি', 'তুমি', 'সে',
     'আমার', 'তোমার', 'তার', 'আমাদের', 'তোমাদের', 'তাদের', 'জন্য', 'থেকে', 'সঙ্গে',
     'দ্বারা', 'কাছে', 'দিকে', 'মধ্যে', 'উপরে', 'নিচে', 'পরে', 'আগে', 'এক', 'দুই'
@@ -99,28 +99,30 @@ if data is not None:
     st.write(data[['text', 'cleaned_text']].head())
 
     st.markdown("#### Word Cloud from Hate Speech Text")
-    hate_speech_text = " ".join(text for text in data[data['label'] != 'Not hate']['cleaned_text'])
+    hate_speech_text = " ".join(text for text in data[data['label'] != 'Not hate']['cleaned_text']).strip()
     
-    font_url = 'https://github.com/google/fonts/raw/main/ofl/solaimanlipi/SolaimanLipi.ttf'
-    try:
-        response = requests.get(font_url)
-        # Save font to a temporary file
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.ttf') as fp:
-            fp.write(response.content)
-            font_path = fp.name
-        
-        wordcloud = WordCloud(
-            font_path=font_path, width=800, height=400,
-            background_color='white', collocations=False
-        ).generate(hate_speech_text)
-        
-        fig_wc, ax_wc = plt.subplots()
-        ax_wc.imshow(wordcloud, interpolation='bilinear')
-        ax_wc.axis('off')
-        st.pyplot(fig_wc)
-        os.remove(font_path) # Clean up the temporary file
-    except Exception as e:
-        st.warning(f"Could not generate word cloud. Error: {e}")
+    if hate_speech_text:
+        font_url = 'https://github.com/google/fonts/raw/main/ofl/solaimanlipi/SolaimanLipi.ttf'
+        try:
+            response = requests.get(font_url)
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.ttf') as fp:
+                fp.write(response.content)
+                font_path = fp.name
+            
+            wordcloud = WordCloud(
+                font_path=font_path, width=800, height=400,
+                background_color='white', collocations=False
+            ).generate(hate_speech_text)
+            
+            fig_wc, ax_wc = plt.subplots()
+            ax_wc.imshow(wordcloud, interpolation='bilinear')
+            ax_wc.axis('off')
+            st.pyplot(fig_wc)
+            os.remove(font_path)
+        except Exception as e:
+            st.warning(f"Could not generate word cloud. Error: {e}")
+    else:
+        st.info("No words found to generate a word cloud for the hate speech category after preprocessing.")
 
     st.subheader("Model Training: Capsule Network with GRU")
 
@@ -179,12 +181,15 @@ if data is not None:
                 return K.sqrt(K.sum(K.square(x), axis=-1))
 
             embedding_dim = 128
-            gru_units = 64
+            gru_units = 128 # Increased GRU units for more capacity
+            dropout_rate = 0.4 # Added dropout for regularization
             
             input_layer = Input(shape=(st.session_state.max_len,))
             embedding_layer = Embedding(max_words, embedding_dim, input_length=st.session_state.max_len)(input_layer)
-            gru_layer = Bidirectional(GRU(gru_units, return_sequences=True))(embedding_layer)
-            capsule = CapsuleLayer(num_capsules=num_classes, dim_capsule=16, routings=3)(gru_layer)
+            embedding_dropout = Dropout(dropout_rate)(embedding_layer)
+            gru_layer = Bidirectional(GRU(gru_units, return_sequences=True))(embedding_dropout)
+            gru_dropout = Dropout(dropout_rate)(gru_layer)
+            capsule = CapsuleLayer(num_capsules=num_classes, dim_capsule=16, routings=3)(gru_dropout)
             output = Lambda(Length)(capsule)
             
             model = Model(inputs=input_layer, outputs=output)
@@ -195,7 +200,7 @@ if data is not None:
             model.summary(print_fn=lambda x: model_summary_list.append(x))
             st.text("\n".join(model_summary_list))
 
-            history = model.fit(X_train, y_train, batch_size=64, epochs=5, validation_split=0.1)
+            history = model.fit(X_train, y_train, batch_size=64, epochs=10, validation_split=0.1) # Increased epochs for better training
             
             # Save model, tokenizer, and encoder to session state
             st.session_state.model = model
@@ -213,7 +218,7 @@ if data is not None:
             y_pred = np.argmax(y_pred_probs, axis=1)
 
             st.text("Classification Report:")
-            report = classification_report(y_test, y_pred, target_names=label_encoder.classes_, output_dict=True)
+            report = classification_report(y_test, y_pred, target_names=label_encoder.classes_, output_dict=True, zero_division=0)
             st.dataframe(pd.DataFrame(report).transpose())
 
             st.text("Confusion Matrix:")
@@ -246,16 +251,13 @@ if st.session_state.model is not None:
     custom_text = st.text_area("Enter Bengali text to classify:")
     if st.button("Classify Text"):
         if custom_text:
-            # Preprocess, tokenize, and pad the custom text
             cleaned_text = preprocess_text(custom_text)
             sequence = st.session_state.tokenizer.texts_to_sequences([cleaned_text])
             padded_sequence = pad_sequences(sequence, maxlen=st.session_state.max_len)
             
-            # Predict
             prediction_probs = st.session_state.model.predict(padded_sequence)
             prediction = np.argmax(prediction_probs, axis=1)
             
-            # Decode and display the result
             predicted_label = st.session_state.label_encoder.inverse_transform(prediction)[0]
             st.success(f"Predicted Label: **{predicted_label}**")
         else:
