@@ -22,15 +22,18 @@ from io import BytesIO
 st.title("Bengali Hate Speech Detection using Capsule Network")
 st.markdown("This application trains a Capsule Network with GRU model to detect hate speech in Bengali text.")
 
-# Function to load data from a raw GitHub URL
+# Function to load data from a local CSV file
 @st.cache_data
 def load_data():
-    url = 'https://raw.githubusercontent.com/rezacsedu/bengali-hate-speech-with-explicitness/main/bengali_hate_speech.csv'
+    file_path = 'bengali_hate_speech_with_explicitness.csv'
     try:
-        df = pd.read_csv(url)
+        df = pd.read_csv(file_path)
         # Drop rows with missing values in 'text' or 'label'
         df.dropna(subset=['text', 'label'], inplace=True)
         return df
+    except FileNotFoundError:
+        st.error(f"Error: The file '{file_path}' was not found. Please make sure it is in the same directory as app.py.")
+        return None
     except Exception as e:
         st.error(f"Error loading data: {e}")
         return None
@@ -254,3 +257,4 @@ if data is not None:
 
 else:
     st.warning("Could not load the dataset. Please check the URL or your connection.")
+
