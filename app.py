@@ -41,7 +41,7 @@ task = st.sidebar.radio(
     "Choose a model to train and test:",
     ('Hate vs. Not Hate (Binary)', 'Multi-Class Hate Speech')
 )
-st.sidebar.info("This project is made by Rutuja Godse, Drishti and team.")
+
 
 
 # Clear session state if task changes to ensure the correct model is used
@@ -541,6 +541,7 @@ if st.session_state.model is not None:
 #             st.success(f"Predicted Label: **{predicted_label}**")
 #         else:
 #             st.warning("Please enter some text to classify.")
+
 
 
 
